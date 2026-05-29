@@ -1,0 +1,126 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║     GLAMFLOW — GitHub Actions Auto-Post Workflow            ║
+# ║     Triggers Render backend on schedule (UTC times)         ║
+# ║     EAT (UTC+3): subtract 3h from each target time         ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+name: GLAMFLOW Auto-Post
+
+on:
+  schedule:
+    # 7 posts per day in EAT (UTC+3) — times listed in UTC
+    - cron: '0 3 * * *'   # 06:00 EAT — Crypto
+    - cron: '0 6 * * *'   # 09:00 EAT — Forex
+    - cron: '0 9 * * *'   # 12:00 EAT — Finance
+    - cron: '0 11 * * *'  # 14:00 EAT — AI/Tech
+    - cron: '0 15 * * *'  # 18:00 EAT — Motivation
+    - cron: '0 17 * * *'  # 20:00 EAT — Crypto
+    - cron: '0 19 * * *'  # 22:00 EAT — Fitness
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      niche:
+        description: 'Content niche'
+        required: false
+        default: 'crypto'
+        type: choice
+        options:
+          - crypto
+          - forex
+          - finance
+          - fitness
+          - ai
+          - motivation
+      post_type:
+        description: 'Post type'
+        required: false
+        default: 'Educational Tip'
+
+jobs:
+  autopost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Determine Niche from Schedule
+        id: niche
+        run: |
+          HOUR=$(date -u +"%H")
+          if [ "$HOUR" = "03" ]; then NICHE="crypto"
+          elif [ "$HOUR" = "06" ]; then NICHE="forex"
+          elif [ "$HOUR" = "09" ]; then NICHE="finance"
+          elif [ "$HOUR" = "11" ]; then NICHE="ai"
+          elif [ "$HOUR" = "15" ]; then NICHE="motivation"
+          elif [ "$HOUR" = "17" ]; then NICHE="crypto"
+          elif [ "$HOUR" = "19" ]; then NICHE="fitness"
+          else NICHE="${{ github.event.inputs.niche || 'crypto' }}"
+          fi
+          echo "niche=$NICHE" >> $GITHUB_OUTPUT
+          echo "Selected niche: $NICHE"
+
+      - name: Trigger Auto-Post on Render
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.RENDER_BACKEND_URL }}/api/autopost" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "niche": "${{ steps.niche.outputs.niche }}",
+              "postType": "${{ github.event.inputs.post_type || 'Educational Tip' }}",
+              "tone": "Authoritative"
+            }')
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Auto-post failed with status $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "✅ Post published successfully"
+
+      - name: Log Result
+        if: always()
+        run: |
+          echo "Niche: ${{ steps.niche.outputs.niche }}"
+          echo "Time (UTC): $(date -u)"
+          echo "Time (EAT): $(TZ='Africa/Nairobi' date)"
+
+# ── MONTHLY TOKEN REFRESH ──────────────────────────────────────
+---
+name: GLAMFLOW Token Refresh
+
+on:
+  schedule:
+    - cron: '0 1 1 * *'  # 1st of every month at 01:00 UTC
+  workflow_dispatch:
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Refresh Instagram Access Token
+        run: |
+          echo "Refreshing long-lived Instagram access token..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.RENDER_BACKEND_URL }}/api/token/refresh" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Token refresh failed!"
+            exit 1
+          fi
+
+          echo "✅ Token refreshed successfully"
